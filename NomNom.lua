@@ -11,6 +11,9 @@
     - custom local chat overlay
     - guarded FTAP toy/vehicle helpers
     - rate-limited protection toggles
+    - bundled from maintainable src modules/reference layout
+    - Extreme Map Patrol / Map Orbit Guard with safe-Y clamping
+    - ChildAdded spawn wait, Fast Verify, recovery lock, authorized cleanup/counter-response gates
 
     Notes:
     - Server-side game state depends on your owned/private place mechanics.
@@ -81,6 +84,11 @@ local State = {
     LoopFling = false,
     LoopFlingCooldown = 0.75,
 
+    AuthorizedCounterResponse = false,
+    AuthorizedCleanupCooldown = 7,
+    AuthorizedCounterCooldown = 6,
+    LastAuthorizedCounterResponse = 0,
+
     GucciGuardEnabled = false,
     GucciGuardMode = "Adaptive High Vault",
     GucciGuardToy = "Auto",
@@ -90,6 +98,17 @@ local State = {
     GucciGuardCheckRate = 0.25,
     GucciGuardMaintainRate = 0.35,
     GucciGuardSpawnCooldown = 2.5,
+    GucciGuardSpawnTimeout = 3.5,
+    GucciGuardFastVerifyWindow = 1.25,
+    GucciGuardFastVerifyInterval = 0.08,
+    GucciPatrolEnabled = true,
+    GucciPatrolIntensity = 1.25,
+    GucciPatrolSafeMinY = 35,
+    GucciPatrolVaultHeight = 135,
+    GucciPatrolWaypointRadius = 180,
+    GucciPatrolWaypointCount = 10,
+    GucciPatrolUpdateInterval = 0.16,
+    GucciPatrolOwnershipInterval = 0.45,
     GucciGuardRespawnBase = 1.5,
     GucciGuardMaxBackoff = 10,
     GucciGuardRetainOnDisable = false,
@@ -114,6 +133,13 @@ local State = {
         LastModeFlip = 0,
         SafeCycleDown = false,
         LastHighMaintain = 0,
+        LastPatrolStep = 0,
+        PatrolIndex = 1,
+        PatrolWaypoints = {},
+        RecoveryWaypoint = nil,
+        RecoveryWaypointCreatedAt = 0,
+        FastVerifyUntil = 0,
+        FastVerifyNext = 0,
         LastOwnershipAttempt = 0,
         LastSeatAttempt = 0,
         LastSuspectSeatAttempt = 0,
@@ -221,6 +247,15 @@ end
 
 local function getToyFolder()
     return Workspace:FindFirstChild(LocalPlayer.Name .. "SpawnedInToys")
+end
+
+local function waitForToyFolder(timeout)
+    local folder = getToyFolder()
+    if folder then return folder end
+    local ok, result = pcall(function()
+        return Workspace:WaitForChild(LocalPlayer.Name .. "SpawnedInToys", timeout or 2)
+    end)
+    return ok and result or nil
 end
 
 local function getMenuToys()
@@ -360,10 +395,11 @@ local function destroyToy(toy)
     end
 end
 
-local function setNetworkOwner(part, cf)
+local function setNetworkOwner(part, cf, interval, keySuffix)
     local remote = getRemote({"GrabEvents", "SetNetworkOwner"})
     if remote and part then
-        fireRateLimited("SetNetworkOwner", 0.12, function()
+        local key = "SetNetworkOwner" .. tostring(keySuffix or "")
+        fireRateLimited(key, interval or 0.12, function()
             remote:FireServer(part, cf or part.CFrame)
         end)
     end
@@ -390,6 +426,39 @@ local function findLatestOwnedToyByNames(names, sinceTime)
         end
     end
     return latest
+end
+
+local function waitForOwnedToyChildAdded(names, sinceTime, timeout)
+    local folder = waitForToyFolder(1.5)
+    if not folder then return nil end
+    local existing = findLatestOwnedToyByNames(names, sinceTime)
+    if existing then return existing end
+
+    local allowed = {}
+    for _, name in ipairs(names) do allowed[name] = true end
+    local finished = false
+    local found = nil
+    local conn
+    conn = folder.ChildAdded:Connect(function(child)
+        if allowed[child.Name] and not found then
+            pcall(function() child:SetAttribute("NomNomSpawnTick", now()) end)
+            found = child
+            finished = true
+        end
+    end)
+
+    local deadline = now() + (timeout or State.GucciGuardSpawnTimeout or 3)
+    repeat
+        local scan = findLatestOwnedToyByNames(names, sinceTime)
+        if scan then
+            found = scan
+            break
+        end
+        task.wait(0.05)
+    until found or finished or now() >= deadline or not State.Enabled
+
+    if conn then pcall(function() conn:Disconnect() end) end
+    return found
 end
 
 local function findFirstDescendantByClass(root, className)
@@ -533,7 +602,9 @@ end
 local function getGucciVaultOffset()
     local mode = State.GucciGuardMode
     local high = getClampedGucciHeight()
-    if mode == "Maximum Upward Vault" or mode == "High Sky Vault" then
+    if mode == "Map Orbit Guard" or mode == "Extreme Map Patrol" then
+        return Vector3.new(0, math.clamp(State.GucciPatrolVaultHeight or high, high, State.GucciGuardMaxHeight), 0)
+    elseif mode == "Maximum Upward Vault" or mode == "High Sky Vault" then
         return Vector3.new(0, high, 0)
     elseif mode == "Adaptive High Vault" then
         local root = getRoot()
@@ -543,6 +614,57 @@ local function getGucciVaultOffset()
         return Vector3.new(0, -math.min(high, 80), 0)
     end
     return Vector3.new(0, high, 0)
+end
+
+local function clampSafePatrolPosition(pos)
+    local safeY = math.max(State.GucciPatrolSafeMinY or 35, (State.AntiVoidY or -100) + 25)
+    local highY = math.clamp(State.GucciPatrolVaultHeight or State.GucciGuardHeight or 135, safeY + 8, State.GucciGuardMaxHeight or 250)
+    return Vector3.new(pos.X, math.max(pos.Y, safeY, highY), pos.Z)
+end
+
+local function rebuildPatrolWaypoints(center)
+    local guard = State.GucciGuard
+    table.clear(guard.PatrolWaypoints)
+    center = center or (getRoot() and getRoot().Position) or Vector3.new(0, State.GucciPatrolSafeMinY, 0)
+    local radius = math.clamp(State.GucciPatrolWaypointRadius or 180, 40, 750)
+    local count = math.clamp(math.floor(State.GucciPatrolWaypointCount or 10), 4, 24)
+    local high = math.clamp(State.GucciPatrolVaultHeight or 135, State.GucciPatrolSafeMinY or 35, State.GucciGuardMaxHeight or 250)
+
+    if Workspace:FindFirstChild("Map") then
+        local samples = {}
+        for _, obj in ipairs(Workspace.Map:GetDescendants()) do
+            if obj:IsA("BasePart") and obj.Size.Magnitude >= 25 and #samples < count then
+                local p = obj.Position + Vector3.new(0, high, 0)
+                if p.Y >= (State.GucciPatrolSafeMinY or 35) then
+                    table.insert(samples, clampSafePatrolPosition(p))
+                end
+            end
+        end
+        for _, p in ipairs(samples) do table.insert(guard.PatrolWaypoints, p) end
+    end
+
+    for i = #guard.PatrolWaypoints + 1, count do
+        local angle = (i / count) * math.pi * 2
+        local yPulse = (i % 3) * 12
+        local p = center + Vector3.new(math.cos(angle) * radius, high + yPulse, math.sin(angle) * radius)
+        table.insert(guard.PatrolWaypoints, clampSafePatrolPosition(p))
+    end
+    guard.PatrolIndex = math.clamp(guard.PatrolIndex or 1, 1, math.max(1, #guard.PatrolWaypoints))
+end
+
+local function getNextPatrolCFrame(root)
+    local guard = State.GucciGuard
+    if #guard.PatrolWaypoints == 0 then rebuildPatrolWaypoints(root and root.Position) end
+    if #guard.PatrolWaypoints == 0 then return nil end
+    local intensity = math.clamp(State.GucciPatrolIntensity or 1.25, 0.25, 3)
+    local jumps = math.max(1, math.floor(intensity + 0.5))
+    guard.PatrolIndex = ((guard.PatrolIndex + jumps - 1) % #guard.PatrolWaypoints) + 1
+    local target = guard.PatrolWaypoints[guard.PatrolIndex]
+    if guard.RecoveryLock and guard.RecoveryWaypoint then
+        target = guard.RecoveryWaypoint:Lerp(target, 0.72)
+    end
+    local lookAt = root and root.Position or Vector3.new(0, target.Y, 0)
+    return CFrame.new(clampSafePatrolPosition(target), lookAt)
 end
 
 local function getGucciSpawnCFrame()
@@ -589,9 +711,10 @@ local function bindGucciGuardModel(model, reason)
     guard.Respawning = false
     guard.SpawnPending = false
     guard.RetryAfter = 0
+    guard.FastVerifyUntil = math.max(guard.FastVerifyUntil or 0, now() + (State.GucciGuardFastVerifyWindow or 1.25))
     if now() - guard.LastOwnershipAttempt >= 0.45 then
         guard.LastOwnershipAttempt = now()
-        setNetworkOwner(anchor, anchor.CFrame)
+        setNetworkOwner(anchor, anchor.CFrame, State.GucciPatrolOwnershipInterval, "Guard")
     end
     if seat and now() - guard.LastSeatAttempt >= 0.85 then
         guard.LastSeatAttempt = now()
@@ -627,7 +750,9 @@ local function maintainHighGucciPosition(force)
     local guard = State.GucciGuard
     if not State.GucciGuardEnabled or not guard.Active then return false end
     local t = now()
-    if not force and t - guard.LastHighMaintain < State.GucciGuardMaintainRate then return false end
+    local fastVerifyActive = (guard.FastVerifyUntil or 0) > t
+    local interval = fastVerifyActive and math.min(State.GucciGuardFastVerifyInterval or 0.08, State.GucciGuardMaintainRate) or State.GucciGuardMaintainRate
+    if not force and t - guard.LastHighMaintain < interval then return false end
     guard.LastHighMaintain = t
 
     local model = guard.CurrentGucciModel
@@ -635,10 +760,18 @@ local function maintainHighGucciPosition(force)
     local root = getRoot()
     if not model or not anchor or not root or not isInstanceAlive(model) or not isInstanceAlive(anchor) then return false end
 
-    local look = root.CFrame.LookVector
-    local planar = Vector3.new(look.X, 0, look.Z)
-    if planar.Magnitude < 0.05 then planar = Vector3.new(0, 0, -1) end
-    local desired = CFrame.new(root.Position + (planar.Unit * math.clamp(State.GucciGuardDistance, 4, 35)) + getGucciVaultOffset(), root.Position)
+    local desired
+    local usePatrol = State.GucciPatrolEnabled or State.GucciGuardMode == "Extreme Map Patrol" or State.GucciGuardMode == "Map Orbit Guard" or guard.RecoveryLock
+    if usePatrol and (force or fastVerifyActive or t - guard.LastPatrolStep >= (State.GucciPatrolUpdateInterval or 0.16)) then
+        guard.LastPatrolStep = t
+        desired = getNextPatrolCFrame(root)
+    end
+    if not desired then
+        local look = root.CFrame.LookVector
+        local planar = Vector3.new(look.X, 0, look.Z)
+        if planar.Magnitude < 0.05 then planar = Vector3.new(0, 0, -1) end
+        desired = CFrame.new(clampSafePatrolPosition(root.Position + (planar.Unit * math.clamp(State.GucciGuardDistance, 4, 35)) + getGucciVaultOffset()), root.Position)
+    end
 
     pcall(function()
         if model.PivotTo then
@@ -650,11 +783,11 @@ local function maintainHighGucciPosition(force)
         anchor.AssemblyAngularVelocity = Vector3.zero
     end)
 
-    if t - guard.LastOwnershipAttempt >= 0.75 then
+    if t - guard.LastOwnershipAttempt >= (State.GucciPatrolOwnershipInterval or 0.45) then
         guard.LastOwnershipAttempt = t
-        setNetworkOwner(anchor, desired)
+        setNetworkOwner(anchor, desired, State.GucciPatrolOwnershipInterval, "Guard")
     end
-    if guard.CurrentSeat and t - guard.LastSeatAttempt >= 1.1 then
+    if guard.CurrentSeat and t - guard.LastSeatAttempt >= (fastVerifyActive and 0.35 or 1.1) then
         guard.LastSeatAttempt = t
         seatLocalCharacterOnGuard(guard.CurrentSeat)
     end
@@ -691,11 +824,7 @@ local function spawnGucciGuard(reason)
             spawnToy(toyName, cf, Vector3.zero)
         end)
         if fired then
-            for _ = 1, 6 do
-                task.wait(0.25)
-                spawnedModel = findLatestOwnedToyByNames({toyName}, t) or findExistingGuardModel()
-                if spawnedModel then break end
-            end
+            spawnedModel = waitForOwnedToyChildAdded({toyName}, t, State.GucciGuardSpawnTimeout) or findExistingGuardModel()
             if spawnedModel then break end
         end
     end
@@ -706,13 +835,15 @@ local function spawnGucciGuard(reason)
         guard.LostCount += 1
         guard.ConsecutiveFailures += 1
         guard.RetryAfter = now() + math.min(State.GucciGuardMaxBackoff, State.GucciGuardRespawnBase + (guard.ConsecutiveFailures * 0.9))
-        notify("Gucci Guard", "Guard spawn cooldown/backoff active after failed spawn", 3)
+        notify("Gucci Guard", "ChildAdded spawn wait timed out; spawnPending cleared with backoff", 3)
         return false
     end
 
-    if bindGucciGuardModel(spawnedModel, reason or "spawned") then
+    if bindGucciGuardModel(spawnedModel, reason or "spawned via ChildAdded") then
         guard.ConsecutiveFailures = 0
         guard.LastSuccessfulProtection = now()
+        guard.FastVerifyUntil = now() + (State.GucciGuardFastVerifyWindow or 1.25)
+        rebuildPatrolWaypoints((getRoot() and getRoot().Position) or nil)
         maintainHighGucciPosition(true)
         return true
     end
@@ -756,16 +887,35 @@ end
 
 local function authorizedTargetGuardCleanup()
     if not State.AuthorizedGuardCleanup then return false end
+    if gucciProtectionConfirmed() then return false end
     local t = now()
     local guard = State.GucciGuard
-    if t - guard.LastAuthorizedCleanup < 6 then return false end
+    if t - guard.LastAuthorizedCleanup < (State.AuthorizedCleanupCooldown or 7) then return false end
     local suspect = getPersistedSuspectedAttacker()
     if not suspect or not isAuthorizedTarget(suspect) then return false end
     local suspectGuard = findVisibleGuardForPlayer(suspect)
     if not suspectGuard then return false end
     guard.LastAuthorizedCleanup = t
-    logDefense("authorized target guard cleanup", suspect)
+    logDefense("Authorized Guard Cleanup: targeted visible suspect guard only", suspect)
     destroyToy(suspectGuard)
+    return true
+end
+
+local function authorizedCounterResponse(reason, position)
+    if not State.AuthorizedCounterResponse then return false end
+    local t = now()
+    if t - State.LastAuthorizedCounterResponse < (State.AuthorizedCounterCooldown or 6) then return false end
+    local suspect = getPersistedSuspectedAttacker()
+    if not suspect or not isAuthorizedTarget(suspect) then return false end
+    State.LastAuthorizedCounterResponse = t
+    logDefense("Authorized Counter Response: bounded private-test marker after recovery start", suspect)
+    local root = getRoot()
+    local targetRoot = getAliveRoot(suspect)
+    if root and targetRoot then
+        fireRateLimited("AuthorizedCounterToy", State.AuthorizedCounterCooldown or 6, function()
+            spawnToy(State.SelectedToy or "DiceBig", CFrame.new(root.Position:Lerp(targetRoot.Position, 0.25) + Vector3.new(0, 6, 0), targetRoot.Position), Vector3.zero)
+        end)
+    end
     return true
 end
 
@@ -774,6 +924,13 @@ local function enterGucciRecoveryLock(reason)
     local guard = State.GucciGuard
     guard.RecoveryLock = true
     guard.RecoveryReason = reason or "unknown"
+    local root = getRoot()
+    if root then
+        guard.RecoveryWaypoint = clampSafePatrolPosition(root.Position + Vector3.new(0, State.GucciPatrolVaultHeight or 135, 0))
+        guard.RecoveryWaypointCreatedAt = now()
+    end
+    guard.FastVerifyUntil = math.max(guard.FastVerifyUntil or 0, now() + (State.GucciGuardFastVerifyWindow or 1.25))
+    rebuildPatrolWaypoints(root and root.Position or nil)
     if State.Threads.GucciRecovery then return end
 
     State.Threads.GucciRecovery = true
@@ -798,7 +955,12 @@ local function enterGucciRecoveryLock(reason)
             if not gucciProtectionConfirmed() then
                 spawnGucciGuard(reason or "recovery lock")
             end
-            local sleepFor = math.clamp(State.GucciGuardRespawnBase + (guard.ConsecutiveFailures * 0.45), 0.65, State.GucciGuardMaxBackoff)
+            maintainHighGucciPosition(true)
+            if not gucciProtectionConfirmed() then
+                authorizedCounterResponse("recovery lock", guard.RecoveryWaypoint)
+            end
+            local fast = (guard.FastVerifyUntil or 0) > now()
+            local sleepFor = fast and (State.GucciGuardFastVerifyInterval or 0.08) or math.clamp(State.GucciGuardRespawnBase + (guard.ConsecutiveFailures * 0.45), 0.65, State.GucciGuardMaxBackoff)
             task.wait(sleepFor)
         end
         State.Threads.GucciRecovery = nil
@@ -825,7 +987,7 @@ local function maintainGucciGuard(forceReason)
         guard.LostCount += 1
         guard.ConsecutiveFailures += 1
         guard.RetryAfter = t + math.min(State.GucciGuardMaxBackoff, State.GucciGuardRespawnBase + (guard.ConsecutiveFailures * 0.65))
-        notify("Gucci Guard", "Recovery lock: " .. reason, 3)
+        notify("Gucci Guard", "recovery lock: " .. reason, 3)
         enterGucciRecoveryLock(reason)
     elseif guard.CurrentSeat then
         guard.Active = true
@@ -897,6 +1059,9 @@ local function performDefensiveResponse(reason, position)
     local target, source = resolveResponseTarget(reason, position)
     logDefense(reason .. " [" .. tostring(source) .. "]", target)
     if State.GucciGuardEnabled then enterGucciRecoveryLock("defense signal: " .. tostring(reason)) end
+    if State.GucciGuardEnabled and State.GucciGuard.RecoveryLock then
+        authorizedCounterResponse(reason, position)
+    end
     if not State.DefensiveResponseEnabled then return end
     local mode = State.DefensiveResponseMode
     if mode == "Off" or mode == "Mark Only" then return end
@@ -1188,7 +1353,12 @@ ProtectionTab:CreateSection("Gucci Guard / Auto Gucci")
 
 ProtectionTab:CreateParagraph({
     Title = "Gucci Guard Safety",
-    Content = "Spawns TractorGreen or CreatureBlobman as a private-test defensive guard anchor. Default modes use High Sky Vault / Adaptive High Vault so toys are kept upward instead of despawning below the map. Downward Vault is unsafe/experimental only.",
+    Content = "Spawns TractorGreen or CreatureBlobman as a private-test defensive guard anchor. Extreme Map Patrol / Map Orbit Guard loops guard toys around safe high map waypoints; toys are clamped above safe minimum Y and never intentionally sent into void. Downward Vault remains unsafe/experimental only.",
+})
+
+ProtectionTab:CreateParagraph({
+    Title = "Fast Verify + ChildAdded spawn wait",
+    Content = "Spawn uses existing toy scan plus ChildAdded wait with spawnPending/backoff instead of fixed delay spam. After bind/recovery, Fast Verify briefly increases bounded checks, then returns to normal maintenance cadence.",
 })
 
 ProtectionTab:CreateParagraph({
@@ -1218,7 +1388,7 @@ ProtectionTab:CreateToggle({
 
 ProtectionTab:CreateDropdown({
     Name = "Gucci Vault Strategy",
-    Options = {"Adaptive High Vault", "High Sky Vault", "Maximum Upward Vault", "Downward Vault (Unsafe Experimental)"},
+    Options = {"Adaptive High Vault", "High Sky Vault", "Maximum Upward Vault", "Map Orbit Guard", "Extreme Map Patrol", "Downward Vault (Unsafe Experimental)"},
     CurrentOption = {State.GucciGuardMode},
     Flag = "NN_GucciGuardMode",
     Callback = function(option)
@@ -1264,6 +1434,66 @@ ProtectionTab:CreateSlider({
     Callback = function(value) State.GucciGuardSpawnCooldown = math.clamp(value, 1, 8) end,
 })
 
+ProtectionTab:CreateSection("Extreme Map Patrol / Map Orbit Guard")
+ProtectionTab:CreateToggle({
+    Name = "Extreme Map Patrol Enabled",
+    CurrentValue = State.GucciPatrolEnabled,
+    Flag = "NN_ExtremeMapPatrol",
+    Callback = function(value)
+        State.GucciPatrolEnabled = value
+        rebuildPatrolWaypoints((getRoot() and getRoot().Position) or nil)
+        notify("Gucci Guard", value and "Extreme Map Patrol enabled" or "Extreme Map Patrol disabled", 2)
+    end,
+})
+ProtectionTab:CreateSlider({
+    Name = "Patrol Speed / Intensity",
+    Range = {0.25, 3},
+    Increment = 0.25,
+    CurrentValue = State.GucciPatrolIntensity,
+    Flag = "NN_GucciPatrolIntensity",
+    Callback = function(value) State.GucciPatrolIntensity = math.clamp(value, 0.25, 3) end,
+})
+ProtectionTab:CreateSlider({
+    Name = "Safe Minimum Y",
+    Range = {0, 150},
+    Increment = 5,
+    CurrentValue = State.GucciPatrolSafeMinY,
+    Flag = "NN_GucciPatrolSafeY",
+    Callback = function(value) State.GucciPatrolSafeMinY = math.clamp(value, 0, 150); rebuildPatrolWaypoints((getRoot() and getRoot().Position) or nil) end,
+})
+ProtectionTab:CreateSlider({
+    Name = "Patrol High Vault Height",
+    Range = {50, State.GucciGuardMaxHeight},
+    Increment = 5,
+    CurrentValue = State.GucciPatrolVaultHeight,
+    Flag = "NN_GucciPatrolVault",
+    Callback = function(value) State.GucciPatrolVaultHeight = math.clamp(value, 50, State.GucciGuardMaxHeight); rebuildPatrolWaypoints((getRoot() and getRoot().Position) or nil) end,
+})
+ProtectionTab:CreateSlider({
+    Name = "Waypoint Radius",
+    Range = {40, 750},
+    Increment = 10,
+    CurrentValue = State.GucciPatrolWaypointRadius,
+    Flag = "NN_GucciPatrolRadius",
+    Callback = function(value) State.GucciPatrolWaypointRadius = math.clamp(value, 40, 750); rebuildPatrolWaypoints((getRoot() and getRoot().Position) or nil) end,
+})
+ProtectionTab:CreateSlider({
+    Name = "Waypoint Count",
+    Range = {4, 24},
+    Increment = 1,
+    CurrentValue = State.GucciPatrolWaypointCount,
+    Flag = "NN_GucciPatrolCount",
+    Callback = function(value) State.GucciPatrolWaypointCount = math.clamp(math.floor(value), 4, 24); rebuildPatrolWaypoints((getRoot() and getRoot().Position) or nil) end,
+})
+ProtectionTab:CreateSlider({
+    Name = "Patrol Update Interval",
+    Range = {0.08, 0.6},
+    Increment = 0.02,
+    CurrentValue = State.GucciPatrolUpdateInterval,
+    Flag = "NN_GucciPatrolInterval",
+    Callback = function(value) State.GucciPatrolUpdateInterval = math.clamp(value, 0.08, 0.6) end,
+})
+
 ProtectionTab:CreateToggle({
     Name = "Retain Gucci Model On Disable",
     CurrentValue = false,
@@ -1286,7 +1516,7 @@ ProtectionTab:CreateButton({
     Callback = function()
         local guard = State.GucciGuard
         local modelName = guard.CurrentGucciModel and guard.CurrentGucciModel.Name or "none"
-        notify("Gucci Guard", string.format("active=%s recovery lock=%s model=%s lost=%d failures=%d attempts=%d spawn cooldown=%.1f backoff=%.1f last ok=%.1fs", tostring(guard.Active), tostring(guard.RecoveryLock), modelName, guard.LostCount, guard.ConsecutiveFailures, guard.RecoveryAttempts, State.GucciGuardSpawnCooldown, math.max(0, guard.RetryAfter - now()), guard.LastSuccessfulProtection > 0 and (now() - guard.LastSuccessfulProtection) or -1), 7)
+        notify("Gucci Guard", string.format("active=%s recovery lock=%s model=%s lost=%d failures=%d attempts=%d spawnPending=%s ChildAdded timeout=%.1f Fast Verify %.1fs patrol=%s waypoints=%d backoff=%.1f", tostring(guard.Active), tostring(guard.RecoveryLock), modelName, guard.LostCount, guard.ConsecutiveFailures, guard.RecoveryAttempts, tostring(guard.SpawnPending), State.GucciGuardSpawnTimeout, math.max(0, (guard.FastVerifyUntil or 0) - now()), tostring(State.GucciPatrolEnabled), #(guard.PatrolWaypoints or {}), math.max(0, guard.RetryAfter - now())), 7)
     end,
 })
 
@@ -1858,7 +2088,7 @@ TargetTab:CreateToggle({
 })
 
 TargetTab:CreateToggle({
-    Name = "Enable Auto Attack Back (Private Test)",
+    Name = "Enable Auto Attack Back (Private Test, legacy gated)",
     CurrentValue = false,
     Flag = "NN_DefenseResponse",
     Callback = function(value)
@@ -1906,12 +2136,22 @@ TargetTab:CreateToggle({
 })
 
 TargetTab:CreateToggle({
-    Name = "Authorized Target Guard Cleanup",
+    Name = "Authorized Guard Cleanup",
     CurrentValue = false,
     Flag = "NN_AuthorizedGuardCleanup",
     Callback = function(value)
         State.AuthorizedGuardCleanup = value
-        notify("NomNom Defense", value and "Authorized guard cleanup enabled for whitelisted targets only" or "Authorized guard cleanup disabled", 3)
+        notify("NomNom Defense", value and "Authorized Guard Cleanup enabled for visible whitelisted suspect guards only" or "Authorized Guard Cleanup disabled", 3)
+    end,
+})
+
+TargetTab:CreateToggle({
+    Name = "Authorized Counter Response",
+    CurrentValue = false,
+    Flag = "NN_AuthorizedCounterResponse",
+    Callback = function(value)
+        State.AuthorizedCounterResponse = value
+        notify("NomNom Defense", value and "Authorized Counter Response armed after local recovery starts" or "Authorized Counter Response disabled", 3)
     end,
 })
 
@@ -1949,7 +2189,7 @@ TargetTab:CreateButton({
 
 TargetTab:CreateParagraph({
     Title = "Target Safety",
-    Content = "Targeted test helpers only scan whitelisted or NomNomAuthorizedTarget players by default. Suspect marks persist across respawn in local state; if no valid authorized target exists, the script only logs/marks and focuses on re-enabling Gucci Guard.",
+    Content = "Targeted test helpers only scan whitelisted or NomNomAuthorizedTarget players by default. Suspect marks persist across respawn in local state; if no valid authorized target exists, the script only logs/marks and focuses on re-enabling Gucci Guard. Authorized Guard Cleanup and Authorized Counter Response are off by default and only run after local Gucci recovery starts.",
 })
 
 --// Vehicle/debug map helpers
@@ -2073,14 +2313,11 @@ trackConnection("DefenseMovementMonitor", RunService.Heartbeat:Connect(function(
     end
 end))
 
-if LocalPlayer.Character then
-    task.defer(function() attachHumanoidMonitor(LocalPlayer.Character) end)
-end
-
 --// Respawn reapply
-trackConnection("CharacterAdded", LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(0.5)
-    local hum = char:FindFirstChildOfClass("Humanoid")
+local function handleCharacterReady(char, reason)
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 3)
+    local root = char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 3)
     if hum then
         hum.WalkSpeed = State.WalkSpeed
         hum.UseJumpPower = true
@@ -2090,19 +2327,30 @@ trackConnection("CharacterAdded", LocalPlayer.CharacterAdded:Connect(function(ch
     if State.GucciGuardEnabled then
         State.GucciGuard.RetryAfter = 0
         State.GucciGuard.RecoveryLock = true
-        task.delay(0.75, function()
-            if State.Enabled and State.GucciGuardEnabled then enterGucciRecoveryLock("character respawn") end
+        if root then
+            State.GucciGuard.RecoveryWaypoint = clampSafePatrolPosition(root.Position + Vector3.new(0, State.GucciPatrolVaultHeight or 135, 0))
+        end
+        task.defer(function()
+            if State.Enabled and State.GucciGuardEnabled then enterGucciRecoveryLock(reason or "character root acquired") end
         end)
     end
     if State.ESPEnabled then refreshESP() end
+end
+
+trackConnection("CharacterAdded", LocalPlayer.CharacterAdded:Connect(function(char)
+    task.defer(function() handleCharacterReady(char, "character respawn") end)
 end))
+
+if LocalPlayer.Character then
+    task.defer(function() handleCharacterReady(LocalPlayer.Character, "initial character") end)
+end
 
 --// Final settings
 local SettingsTab = Window:CreateTab("Settings", 4483362458)
 SettingsTab:CreateSection("Build Info")
 SettingsTab:CreateParagraph({
     Title = "NomNom FTAP Roo Build",
-    Content = "Consolidated from Source_RooClone_20260629-183754. Focus: one clean UI, rerun cleanup, local debug visuals, chat overlay, High Vault Gucci Guard, recovery lock, spawn cooldown, defensive detection/response, guarded toy/map helpers, respawn safety, and low-noise loops. Leak-prone means privacy/stability risk from exposed hooks/logs, not lower protection power; risky extras stay off by default.",
+    Content = "Bundled standalone from src reference modules. Focus: Extreme Map Patrol / Map Orbit Guard, ChildAdded spawn wait with spawnPending, Fast Verify, recovery lock, safe-Y patrol, authorized cleanup/counter-response gates, respawn/root reacquisition, local UI/visual/chat/tools, and low-noise bounded loops. See SOURCE_INSIGHTS for mined safe patterns.",
 })
 SettingsTab:CreateButton({
     Name = "Cleanup / Unload Script",
