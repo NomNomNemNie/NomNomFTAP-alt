@@ -90,8 +90,10 @@ Build rule: treat `NomNom.lua` as the generated/manual bundle. If source modules
 - Extreme Map Patrol / Map Orbit Guard moves guard toys through bounded high map waypoints and clamps all patrol positions above Safe Minimum Y.
 - The guard no longer intentionally sends toys into the void; recovery stores a safe recovery waypoint and patrols from it.
 - Spawn uses existing guard scan plus ChildAdded wait with spawnPending, timeout, cooldown, and backoff.
-- Fast Verify briefly increases bounded protection checks after spawn/recovery, then returns to normal cadence.
+- Fast Verify briefly increases bounded protection checks after spawn/recovery or vulnerable windows, then returns to normal cadence.
 - Recovery lock preserves intent through death/respawn and starts as soon as CharacterAdded/root acquisition allows.
+- Ported The Wourld Gucci Protect patterns into NomNom only: anti-steal-seat watches each guard seat occupant change, anti-destroy watches model/seat ancestry, and protection loss triggers local recovery lock.
+- Verified protected now requires coherent local humanoid/seat/model state, expected toy-folder/plot ancestry, optional owner markers not stolen from the local player, and safe patrol-area placement.
 - Authorized Guard Cleanup and Authorized Counter Response are off by default and require authorized/suspected targets.
 
 ## Maintenance notes

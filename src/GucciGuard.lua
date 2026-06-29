@@ -28,6 +28,14 @@ GucciGuard.config = {
         windowSeconds = 1.25,
         intervalSeconds = 0.08,
     },
+    protection = {
+        reference = "The Wourld",
+        antiStealSeat = true,
+        antiDestroy = true,
+        verifiedProtected = true,
+        boundedFastCheck = true,
+        guardedSeatOccupant = true,
+    },
 }
 
 GucciGuard.safePatterns = {
@@ -37,6 +45,9 @@ GucciGuard.safePatterns = {
     "Create a recovery waypoint from current/root position and clamp it above safe minimum Y.",
     "Move guard toys around generated/discovered map waypoints; never intentionally below safe Y.",
     "During recovery lock, run ownership, reseat, spawn/reuse, patrol, and fast verify in bounded cadence.",
+    "Port The Wourld Gucci Protect idea as local-only hardening: anti-steal-seat watches seat occupant changes and treats a stolen/cleared guard seat as protection loss.",
+    "Port anti-destroy checks by watching model/seat ancestry and requiring model to remain in the owned toy folder or plot item containers.",
+    "Use stricter verified protected criteria: local humanoid, guard seat, model ancestry, owner marker, and safe patrol-area position must all be coherent.",
 }
 
 return GucciGuard

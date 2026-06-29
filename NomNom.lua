@@ -144,6 +144,12 @@ local State = {
         LastSeatAttempt = 0,
         LastSuspectSeatAttempt = 0,
         LastAuthorizedCleanup = 0,
+        LastVerifiedProtected = 0,
+        LastProtectionLoss = 0,
+        PendingProtectionLoss = nil,
+        LastSeatOccupantName = "none",
+        LastOwnerName = "unknown",
+        LastProtectedStatus = "not checked",
     },
 
     DefensiveMonitorEnabled = true,
@@ -538,6 +544,11 @@ local function cleanupGucciGuard(destroyModel, keepRecoveryLock)
     guard.SpawnPending = false
     guard.CurrentSeat = nil
     guard.CurrentAnchor = nil
+    guard.PendingProtectionLoss = nil
+    guard.LastProtectedStatus = "cleaned"
+    removeConnection("GucciModelAncestry")
+    removeConnection("GucciSeatAncestry")
+    removeConnection("GucciSeatOccupant")
     if not keepRecoveryLock then
         guard.RecoveryLock = false
         guard.RecoveryReason = nil
@@ -593,6 +604,139 @@ local function findExistingGuardModel()
         end
     end
     return best
+end
+
+local function getPartOwnerName(inst)
+    if not inst then return nil end
+    local value = nil
+    pcall(function()
+        value = inst:FindFirstChild("PartOwner") or inst:FindFirstChild("PartOwner", true)
+    end)
+    if value and value:IsA("StringValue") then
+        return value.Value
+    end
+    return nil
+end
+
+local function getGuardOwnerName(model, anchor)
+    if not model then return nil end
+    local function firstOwner(candidate)
+        local ownerName = getPartOwnerName(candidate)
+        if ownerName and ownerName ~= "" then
+            return ownerName
+        end
+        return nil
+    end
+    return firstOwner(model:FindFirstChild("Head"))
+        or firstOwner(model:FindFirstChild("GrabbableHitbox"))
+        or firstOwner(model:FindFirstChild("VehicleSeat") or model:FindFirstChildWhichIsA("VehicleSeat", true))
+        or firstOwner(anchor)
+end
+
+local function isGuardInExpectedContainer(model)
+    if not model or not isInstanceAlive(model) then return false end
+    local folder = getOwnedToyFolder()
+    if folder and model:IsDescendantOf(folder) then return true end
+    local plots = Workspace:FindFirstChild("Plots")
+    if plots and model:IsDescendantOf(plots) then return true end
+    local plotItems = Workspace:FindFirstChild("PlotItems")
+    if plotItems and model:IsDescendantOf(plotItems) then return true end
+    return false
+end
+
+local function flagGucciProtectionLoss(reason)
+    if not State.GucciGuardEnabled then return end
+    local guard = State.GucciGuard
+    guard.PendingProtectionLoss = tostring(reason or "protection loss")
+    guard.LastProtectionLoss = now()
+    guard.RecoveryLock = true
+    guard.RecoveryReason = guard.PendingProtectionLoss
+    guard.FastVerifyUntil = math.max(guard.FastVerifyUntil or 0, now() + (State.GucciGuardFastVerifyWindow or 1.25))
+    guard.LastProtectedStatus = guard.PendingProtectionLoss
+end
+
+local function monitorBoundGucciGuard(model, seat)
+    removeConnection("GucciModelAncestry")
+    removeConnection("GucciSeatAncestry")
+    removeConnection("GucciSeatOccupant")
+    local guard = State.GucciGuard
+    if model then
+        trackConnection("GucciModelAncestry", model.AncestryChanged:Connect(function(_, parent)
+            if State.GucciGuardEnabled and guard.CurrentGucciModel == model and (not parent or not model:IsDescendantOf(Workspace)) then
+                flagGucciProtectionLoss("anti-destroy protection loss: model ancestry changed")
+            end
+        end))
+    end
+    if seat then
+        trackConnection("GucciSeatAncestry", seat.AncestryChanged:Connect(function(_, parent)
+            if State.GucciGuardEnabled and guard.CurrentSeat == seat and (not parent or not seat:IsDescendantOf(Workspace)) then
+                flagGucciProtectionLoss("anti-destroy protection loss: seat not descendant of workspace")
+            end
+        end))
+        trackConnection("GucciSeatOccupant", seat:GetPropertyChangedSignal("Occupant"):Connect(function()
+            if not State.GucciGuardEnabled or guard.CurrentSeat ~= seat then return end
+            local hum = getHumanoid()
+            local occupant = seat.Occupant
+            guard.LastSeatOccupantName = occupant and occupant.Parent and occupant.Parent.Name or "none"
+            guard.FastVerifyUntil = math.max(guard.FastVerifyUntil or 0, now() + 0.6)
+            if occupant and hum and occupant ~= hum then
+                flagGucciProtectionLoss("anti-steal-seat protection loss: seat occupant changed")
+            elseif not occupant and hum and (guard.LastVerifiedProtected or 0) > 0 and hum.SeatPart ~= seat then
+                flagGucciProtectionLoss("anti-steal-seat protection loss: seat occupant cleared")
+            end
+        end))
+    end
+end
+
+local function getGucciProtectionState()
+    local guard = State.GucciGuard
+    local model = guard.CurrentGucciModel
+    local seat = guard.CurrentSeat
+    local anchor = guard.CurrentAnchor or seat or findFirstBasePart(model)
+    local root = getRoot()
+    local hum = getHumanoid()
+    if not State.GucciGuardEnabled then return false, "guard disabled" end
+    if guard.PendingProtectionLoss then return false, guard.PendingProtectionLoss end
+    if not isInstanceAlive(model) then return false, "anti-destroy protection loss: model missing" end
+    if not model:IsDescendantOf(Workspace) then return false, "anti-destroy protection loss: model not descendant of workspace" end
+    if not isGuardInExpectedContainer(model) then return false, "anti-destroy protection loss: model not in owned toy folder/plot items" end
+    if not seat then return false, "verified protected failed: seat unavailable" end
+    if not isInstanceAlive(seat) or not seat:IsDescendantOf(Workspace) then return false, "anti-destroy protection loss: seat not descendant of workspace" end
+    if not root or not hum or hum.Health <= 0 then return false, "verified protected failed: character unavailable" end
+
+    local occupant = seat.Occupant
+    guard.LastSeatOccupantName = occupant and occupant.Parent and occupant.Parent.Name or "none"
+    if occupant and occupant ~= hum then
+        return false, "anti-steal-seat protection loss: seat occupant changed"
+    end
+    if hum.SeatPart and hum.SeatPart ~= seat then
+        return false, "anti-steal-seat protection loss: local humanoid seated elsewhere"
+    end
+    local seatDistance = (root.Position - seat.Position).Magnitude
+    if hum.SeatPart ~= seat and seatDistance > math.max(12, State.GucciGuardDistance + 5) then
+        return false, "verified protected failed: local humanoid not seated/proximate"
+    end
+
+    local ownerName = getGuardOwnerName(model, anchor)
+    guard.LastOwnerName = ownerName or "unknown"
+    if ownerName and ownerName ~= LocalPlayer.Name then
+        return false, "protection loss: ownership loss to " .. tostring(ownerName)
+    end
+
+    if anchor and anchor:IsA("BasePart") then
+        local safeY = math.max(State.GucciPatrolSafeMinY or 35, (State.AntiVoidY or -100) + 25)
+        if anchor.Position.Y < safeY - 8 then
+            return false, "protection loss: model moved out of safe patrol area"
+        end
+        local maxDistance = math.max(160, (State.GucciPatrolWaypointRadius or 180) + (State.GucciGuardMaxHeight or 250) + 100)
+        if (root.Position - anchor.Position).Magnitude > maxDistance then
+            return false, "protection loss: model moved out of safe patrol area"
+        end
+    end
+
+    guard.LastProtectedStatus = "verified protected"
+    guard.LastVerifiedProtected = now()
+    return true, "verified protected"
 end
 
 local function getClampedGucciHeight()
@@ -711,6 +855,9 @@ local function bindGucciGuardModel(model, reason)
     guard.Respawning = false
     guard.SpawnPending = false
     guard.RetryAfter = 0
+    guard.PendingProtectionLoss = nil
+    guard.LastProtectedStatus = "binding from " .. tostring(reason or "scan")
+    monitorBoundGucciGuard(model, seat)
     guard.FastVerifyUntil = math.max(guard.FastVerifyUntil or 0, now() + (State.GucciGuardFastVerifyWindow or 1.25))
     if now() - guard.LastOwnershipAttempt >= 0.45 then
         guard.LastOwnershipAttempt = now()
@@ -725,25 +872,15 @@ local function bindGucciGuardModel(model, reason)
 end
 
 local function gucciLossReason()
-    local guard = State.GucciGuard
-    local model = guard.CurrentGucciModel
-    local seat = guard.CurrentSeat
-    local root = getRoot()
-    local hum = getHumanoid()
     if not State.GucciGuardEnabled then return nil end
-    if not isInstanceAlive(model) then return "model missing" end
-    if seat and not isInstanceAlive(seat) then return "seat missing" end
-    if not seat then return "seat unavailable" end
-    if not root or not hum or hum.Health <= 0 then return "character unavailable" end
-    if hum.SeatPart ~= seat and (root.Position - seat.Position).Magnitude > math.max(18, State.GucciGuardDistance + 8) then
-        return "character unprotected"
-    end
-    if not model:IsDescendantOf(getOwnedToyFolder() or Workspace) then return "model ancestry changed" end
-    return nil
+    local ok, reason = getGucciProtectionState()
+    if ok then return nil end
+    return reason or "protection loss"
 end
 
 local function gucciProtectionConfirmed()
-    return State.GucciGuardEnabled and gucciLossReason() == nil
+    local ok = getGucciProtectionState()
+    return State.GucciGuardEnabled and ok == true
 end
 
 local function maintainHighGucciPosition(force)
@@ -787,9 +924,12 @@ local function maintainHighGucciPosition(force)
         guard.LastOwnershipAttempt = t
         setNetworkOwner(anchor, desired, State.GucciPatrolOwnershipInterval, "Guard")
     end
-    if guard.CurrentSeat and t - guard.LastSeatAttempt >= (fastVerifyActive and 0.35 or 1.1) then
+    if guard.CurrentSeat and t - guard.LastSeatAttempt >= (fastVerifyActive and 0.25 or 0.85) then
         guard.LastSeatAttempt = t
-        seatLocalCharacterOnGuard(guard.CurrentSeat)
+        local hum = getHumanoid()
+        if not hum or hum.SeatPart ~= guard.CurrentSeat or guard.CurrentSeat.Occupant ~= hum then
+            seatLocalCharacterOnGuard(guard.CurrentSeat)
+        end
     end
     return true
 end
@@ -945,9 +1085,10 @@ local function enterGucciRecoveryLock(reason)
             if gucciProtectionConfirmed() then
                 guard.RecoveryLock = false
                 guard.RecoveryReason = nil
+                guard.PendingProtectionLoss = nil
                 guard.ConsecutiveFailures = 0
                 guard.LastSuccessfulProtection = now()
-                notify("Gucci Guard", "Recovery lock cleared; protection confirmed", 3)
+                notify("Gucci Guard", "Recovery lock cleared; verified protected", 3)
                 break
             end
             recoverViaSuspectSeat()
@@ -971,7 +1112,9 @@ local function maintainGucciGuard(forceReason)
     if not State.GucciGuardEnabled then return end
     local guard = State.GucciGuard
     local t = now()
-    if not forceReason and t - guard.LastCheck < State.GucciGuardCheckRate then
+    local fastVerifyActive = (guard.FastVerifyUntil or 0) > t or guard.RecoveryLock or guard.PendingProtectionLoss ~= nil
+    local checkInterval = fastVerifyActive and math.min(State.GucciGuardFastVerifyInterval or 0.08, State.GucciGuardCheckRate or 0.25) or (State.GucciGuardCheckRate or 0.25)
+    if not forceReason and t - guard.LastCheck < checkInterval then
         maintainHighGucciPosition(false)
         return
     end
@@ -992,7 +1135,9 @@ local function maintainGucciGuard(forceReason)
     elseif guard.CurrentSeat then
         guard.Active = true
         guard.ConsecutiveFailures = 0
+        guard.PendingProtectionLoss = nil
         guard.LastSuccessfulProtection = t
+        guard.LastVerifiedProtected = t
         guard.RecoveryLock = false
         maintainHighGucciPosition(false)
     elseif not guard.Active then
@@ -1353,7 +1498,7 @@ ProtectionTab:CreateSection("Gucci Guard / Auto Gucci")
 
 ProtectionTab:CreateParagraph({
     Title = "Gucci Guard Safety",
-    Content = "Spawns TractorGreen or CreatureBlobman as a private-test defensive guard anchor. Extreme Map Patrol / Map Orbit Guard loops guard toys around safe high map waypoints; toys are clamped above safe minimum Y and never intentionally sent into void. Downward Vault remains unsafe/experimental only.",
+    Content = "Spawns TractorGreen or CreatureBlobman as a private-test defensive guard anchor. Extreme Map Patrol / Map Orbit Guard loops guard toys around safe high map waypoints; toys are clamped above safe minimum Y and never intentionally sent into void. Ported protection patterns from The Wourld add anti-steal-seat, anti-destroy, seat occupant, ownership, and safe patrol-area checks before declaring verified protected. Downward Vault remains unsafe/experimental only.",
 })
 
 ProtectionTab:CreateParagraph({
@@ -1377,6 +1522,9 @@ ProtectionTab:CreateToggle({
             State.GucciGuard.ConsecutiveFailures = 0
             State.GucciGuard.RecoveryAttempts = 0
             State.GucciGuard.RetryAfter = 0
+            State.GucciGuard.PendingProtectionLoss = nil
+            State.GucciGuard.LastProtectedStatus = "enabled; awaiting verified protected"
+            State.GucciGuard.FastVerifyUntil = now() + (State.GucciGuardFastVerifyWindow or 1.25)
             State.GucciGuard.RecoveryLock = true
             task.spawn(function() enterGucciRecoveryLock("enabled") end)
         else
@@ -1516,7 +1664,8 @@ ProtectionTab:CreateButton({
     Callback = function()
         local guard = State.GucciGuard
         local modelName = guard.CurrentGucciModel and guard.CurrentGucciModel.Name or "none"
-        notify("Gucci Guard", string.format("active=%s recovery lock=%s model=%s lost=%d failures=%d attempts=%d spawnPending=%s ChildAdded timeout=%.1f Fast Verify %.1fs patrol=%s waypoints=%d backoff=%.1f", tostring(guard.Active), tostring(guard.RecoveryLock), modelName, guard.LostCount, guard.ConsecutiveFailures, guard.RecoveryAttempts, tostring(guard.SpawnPending), State.GucciGuardSpawnTimeout, math.max(0, (guard.FastVerifyUntil or 0) - now()), tostring(State.GucciPatrolEnabled), #(guard.PatrolWaypoints or {}), math.max(0, guard.RetryAfter - now())), 7)
+        local _, currentStatus = getGucciProtectionState()
+        notify("Gucci Guard", string.format("active=%s recovery lock=%s model=%s status=%s occupant=%s owner=%s lost=%d failures=%d attempts=%d spawnPending=%s ChildAdded timeout=%.1f Fast Verify %.1fs patrol=%s waypoints=%d backoff=%.1f", tostring(guard.Active), tostring(guard.RecoveryLock), modelName, tostring(currentStatus or guard.LastProtectedStatus), tostring(guard.LastSeatOccupantName), tostring(guard.LastOwnerName), guard.LostCount, guard.ConsecutiveFailures, guard.RecoveryAttempts, tostring(guard.SpawnPending), State.GucciGuardSpawnTimeout, math.max(0, (guard.FastVerifyUntil or 0) - now()), tostring(State.GucciPatrolEnabled), #(guard.PatrolWaypoints or {}), math.max(0, guard.RetryAfter - now())), 8)
     end,
 })
 
@@ -2350,7 +2499,7 @@ local SettingsTab = Window:CreateTab("Settings", 4483362458)
 SettingsTab:CreateSection("Build Info")
 SettingsTab:CreateParagraph({
     Title = "NomNom FTAP Roo Build",
-    Content = "Bundled standalone from src reference modules. Focus: Extreme Map Patrol / Map Orbit Guard, ChildAdded spawn wait with spawnPending, Fast Verify, recovery lock, safe-Y patrol, authorized cleanup/counter-response gates, respawn/root reacquisition, local UI/visual/chat/tools, and low-noise bounded loops. See SOURCE_INSIGHTS for mined safe patterns.",
+    Content = "Bundled standalone from src reference modules. Focus: Extreme Map Patrol / Map Orbit Guard, ChildAdded spawn wait with spawnPending, Fast Verify, recovery lock, safe-Y patrol, The Wourld-inspired anti-steal-seat/anti-destroy verified protected checks, authorized cleanup/counter-response gates, respawn/root reacquisition, local UI/visual/chat/tools, and low-noise bounded loops. See SOURCE_INSIGHTS for mined safe patterns.",
 })
 SettingsTab:CreateButton({
     Name = "Cleanup / Unload Script",

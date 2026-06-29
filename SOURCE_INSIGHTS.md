@@ -22,6 +22,7 @@ This pass mined engineering patterns from the source reference clone and intenti
 8. **Cleanup discipline**: track connections/instances and cleanup guard state on unload or disable.
 9. **Target authorization**: all player-affecting cleanup/counter-response behavior stays off by default and requires authorized/suspected target validation.
 10. **Death/respawn reacquisition**: persist recovery intent and suspect markers, then reacquire character/root/humanoid as early as `CharacterAdded` and root availability allow.
+11. **The Wourld Gucci Protect hardening**: port the refined local-protection ideas without copying destructive behavior: watch each seat occupant, monitor model/seat ancestry for anti-destroy signals, re-check owner markers, and require verified protected state before clearing recovery.
 
 ## Changes reflected in this clone
 
@@ -31,3 +32,4 @@ This pass mined engineering patterns from the source reference clone and intenti
 - Added recovery waypoint and `recovery lock` patrol/ownership/reseat loop.
 - Added off-by-default `Authorized Guard Cleanup` and `Authorized Counter Response` gates.
 - Updated source modules under [`src`](src:1) to document Core/State/Cleanup, UI, GucciGuard, Defense, Toys, Visuals, Chat, Vehicles, and SourceInsights separation.
+- Added NomNom-only Gucci protection hardening inspired by [`The Wourld`](../The%20Wourld:1): anti-steal-seat, anti-destroy, seat occupant monitoring, ownership loss checks, safe patrol-area validation, and stricter verified protected criteria that treat failures as protection loss and enter recovery lock.

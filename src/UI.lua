@@ -12,6 +12,7 @@ UI.tabs = {
         "Gucci Guard / Auto Gucci",
         "Extreme Map Patrol / Map Orbit Guard",
         "Fast Verify + ChildAdded spawn wait",
+        "Verified protected / anti-steal-seat / anti-destroy status",
     },
     Visuals = {"Local Debug ESP"},
     Chat = {"NomNom Local Chat Overlay"},

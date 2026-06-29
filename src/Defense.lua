@@ -19,6 +19,8 @@ Defense.safeFlow = {
     "Only after recovery starts, optionally run Authorized Guard Cleanup / Authorized Counter Response.",
     "Reject all cleanup/counter-response unless suspect is whitelisted or NomNomAuthorizedTarget.",
     "Use cooldowns and bounded retries; otherwise log/mark only.",
+    "Gucci protection loss from anti-steal-seat, anti-destroy, seat occupant mismatch, ownership loss, or safe patrol-area drift starts recovery lock first.",
+    "Do not attack indiscriminately on guard protection loss; destructive/counter behavior remains off by default and authorized/suspected-target gated.",
 }
 
 return Defense
