@@ -1,30 +1,38 @@
-# NomNom FTAP Alt - The Wourld Obsidian Base
+# NomNomFTAP-alt
 
-This alt repository contains the generated `NomNom.lua` for the NomNom alt target.
+Unified Wourld-style Obsidian build for private Roblox/FTAP development.
+
+## Usage
+
+Paste-run `NomNom.lua`. The script loads the Obsidian UI, opens `NomNom FTAP Alt • Wourld Unified`, and exposes the integrated controls directly. Right Control toggles the Obsidian window when supported by the UI library.
 
 ## Architecture
 
-`NomNom.lua` uses `Source/Strong/The Wourld` as the real base script. The Wourld still creates its own Obsidian window, tabs, mechanics, settings, and runtime behavior.
+`NomNom.lua` is a standalone synthesized script, not a pack loader.
 
-The generator inserts one additional Obsidian tab into The Wourld's tab table:
+- Wourld UI/UX is used as the base style.
+- NoName and XOCO feature concepts are integrated directly into Wourld-style tabs and groupboxes.
+- Shared helpers manage remotes, character refresh, toy spawning, network ownership, notifications, tracked connections, tracked instances, task loops, respawn handling, and rerun cleanup.
+- The previous runtime is cleaned before a new paste-run session starts.
 
-- `NomNom Packs` - an in-window pack management tab.
+## Integrated tabs
 
-Inside that tab, the build adds:
+- Home
+- Protection / Gucci
+- Combat / Grab
+- Player
+- Visuals
+- Toys / Utility
+- Teleports / Map
+- Settings
 
-- `Load NoName Pack` - manually decodes and runs the embedded `Source/Strong/NoName` payload.
-- `Load XOCO Pack` - manually decodes and runs the embedded `Source/Strong/XOCO` payload.
-- `Print Pack Status` - prints the pack summaries and recent loader status messages.
-- `Reset Load Markers` - clears the lazy-loader markers so a pack can be attempted again without forcing its internals to unload.
+## Source summary
 
-## Lazy payload strategy
+See `STRONG_COMPARISON.md` for the full source comparison and integration notes.
 
-`NoName` and `XOCO` are not pasted into The Wourld's top-level scope. They are base64-encoded into chunk arrays and decoded only from the Obsidian button callbacks. This avoids malformed-string fragility and avoids adding large pack bodies to the same top-level local/register scope as The Wourld.
+## Safety notes
 
-## Public-room message policy
-
-The build does not auto-send public-room startup messages. The visible base source is sanitized for known public-room API identifiers, and decoded extra packs are sanitized immediately before compilation.
-
-## Rebuild
-
-Run `_roo_build_nomnom_alt.py` from this repository or from the workspace root to regenerate `NomNom.lua` and this README from the current `Source/Strong` files.
+- No lazy source-pack buttons.
+- No encoded payload pack loader or encoded chunk table structure.
+- No automatic public-chat send, startup room spam, or public-chat advertisement logic.
+- No absolute local workstation paths are required by repo files.
