@@ -1,39 +1,30 @@
-# NomNom FTAP Alt - Merged 3-Pack Build
+# NomNom FTAP Alt - The Wourld Obsidian Base
 
-This alt repository contains the standalone merged `NomNom.lua` launcher for the NomNom alt target.
+This alt repository contains the generated `NomNom.lua` for the NomNom alt target.
 
-## What is merged
+## Architecture
 
-`NomNom.lua` embeds all three `Source/Strong` packs as lazy base64 chunk arrays:
+`NomNom.lua` uses `Source/Strong/The Wourld` as the real base script. The Wourld still creates its own Obsidian window, tabs, mechanics, settings, and runtime behavior.
 
-- `The Wourld Base` - base pack with Defense, Target, Visuals, Server, Misc, Keybinds, Owner, Credits, and UI settings.
-- `NoName Pack` - defense, grab tools, player controls, target tools, keybinds, visuals, misc, owner/config, and lag-related sections.
-- `XOCO Pack` - defense, target, grab, player, misc, keybinds, and visuals.
+The generator inserts one additional Obsidian tab into The Wourld's tab table:
 
-The launcher itself is the only code that runs on paste. Each pack is decoded, sanitized, compiled, and executed only when its load button is pressed.
+- `NomNom Packs` - an in-window pack management tab.
 
-## Resonance-inspired organization
+Inside that tab, the build adds:
 
-The reference page at `https://marshelx.github.io/resonance-features/` uses an Obsidian-style layout with tabs such as Home, Combat, Visual, Misc, Invincibility, Toys, Player, Target, Keybinds, Lists, Auto-Clicker, and Settings. Its group boxes include areas such as Auras, Grabs, Antis, Counter-attack, ESP, Game Tweaks, Teleporting, Players, Themes, Configuration, and Notifications.
+- `Load NoName Pack` - manually decodes and runs the embedded `Source/Strong/NoName` payload.
+- `Load XOCO Pack` - manually decodes and runs the embedded `Source/Strong/XOCO` payload.
+- `Print Pack Status` - prints the pack summaries and recent loader status messages.
+- `Reset Load Markers` - clears the lazy-loader markers so a pack can be attempted again without forcing its internals to unload.
 
-This build adapts that structure into these launcher categories:
+## Lazy payload strategy
 
-- Home
-- Combat
-- Movement
-- Visuals
-- Utility
-- Protection/Gucci
-- Teleports/Map
-- Settings
-- Search/Favorites/Status
+`NoName` and `XOCO` are not pasted into The Wourld's top-level scope. They are base64-encoded into chunk arrays and decoded only from the Obsidian button callbacks. This avoids malformed-string fragility and avoids adding large pack bodies to the same top-level local/register scope as The Wourld.
 
-## Safety and rerun behavior
+## Public-room message policy
 
-Automatic public-room message behavior is blocked by the launcher sanitizer before any selected pack runs. The launcher does not send startup public-room messages.
+The build does not auto-send public-room startup messages. The visible base source is sanitized for known public-room API identifiers, and decoded extra packs are sanitized immediately before compilation.
 
-The build includes rerun cleanup for the launcher UI. Re-pasting the script removes the previous launcher instance before creating a new one. Pack internals still use their own runtime/UI behavior after being manually loaded.
+## Rebuild
 
-## Usage
-
-Paste-run `NomNom.lua`, then choose a pack from the launcher. Right Control toggles the launcher visibility.
+Run `_roo_build_nomnom_alt.py` from this repository or from the workspace root to regenerate `NomNom.lua` and this README from the current `Source/Strong` files.
