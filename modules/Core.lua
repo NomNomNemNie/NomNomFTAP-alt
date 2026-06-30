@@ -36,6 +36,7 @@ function Core.init()
             gucciToy = "TractorGreen",
             inputToy = "FoodHamburger",
             antiKickToy = "SpookyCandle1",
+            shurikenAntiKickDistance = 20,
         },
         character = nil,
         humanoid = nil,
@@ -130,6 +131,7 @@ function Core.init()
         DataEvents = ReplicatedStorage:WaitForChild("DataEvents", 10),
         GameCorrectionEvents = ReplicatedStorage:WaitForChild("GameCorrectionEvents", 10),
     }
+    Remotes.BombEvents = ReplicatedStorage:FindFirstChild("BombEvents")
     Remotes.SetNetworkOwner = Remotes.GrabEvents and Remotes.GrabEvents:WaitForChild("SetNetworkOwner", 10)
     Remotes.CreateGrabLine = Remotes.GrabEvents and Remotes.GrabEvents:WaitForChild("CreateGrabLine", 10)
     Remotes.DestroyGrabLine = Remotes.GrabEvents and Remotes.GrabEvents:WaitForChild("DestroyGrabLine", 10)
@@ -140,6 +142,8 @@ function Core.init()
     Remotes.Sticky = Remotes.PlayerEvents and Remotes.PlayerEvents:WaitForChild("StickyPartEvent", 10)
     Remotes.LineColor = Remotes.DataEvents and Remotes.DataEvents:WaitForChild("UpdateLineColorsEvent", 10)
     Remotes.Correction = Remotes.GameCorrectionEvents and Remotes.GameCorrectionEvents:FindFirstChild("GameCorrectionsNotify")
+    Remotes.StopAllVelocity = Remotes.GameCorrectionEvents and Remotes.GameCorrectionEvents:FindFirstChild("StopAllVelocity")
+    Remotes.BombExplode = Remotes.BombEvents and Remotes.BombEvents:FindFirstChild("BombExplode")
 
     local function refreshCharacter(char)
         runtime.character = char or LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -450,22 +454,64 @@ function Core.init()
         runtime.toggles.antiBurn = enabled
         disconnectKey("antiBurn")
         if not enabled then return end
-        local _, hum, root = charParts()
+        local char, hum, root = charParts()
         local fireDebounce = hum and hum:FindFirstChild("FireDebounce")
         if fireDebounce then
             setKeyConnection("antiBurn", fireDebounce:GetPropertyChangedSignal("Value"):Connect(function()
                 if fireDebounce.Value and root then
                     local old = root.CFrame
-                    local barrier = get({Workspace, "Map", "Hole", "PoisonBigHole", "ExtinguishPart"}, 1)
-                    if barrier and barrier:IsA("BasePart") then
-                        local oldPos = barrier.Position
-                        local deadline = os.clock() + 2
-                        repeat
-                            barrier.Position = root.Position
-                            task.wait()
-                        until not fireDebounce.Value or os.clock() > deadline
-                        barrier.Position = oldPos
-                        root.CFrame = old
+                    local extinguish = get({Workspace, "Map", "Hole", "PoisonBigHole", "ExtinguishPart"}, 1)
+                    local plotBarrier = get({Workspace, "Plots", "Plot2", "Barrier", "PlotBarrier"}, 1)
+                    local movedPart = nil
+                    local oldPos = nil
+                    if extinguish and extinguish:IsA("BasePart") then
+                        movedPart = extinguish
+                        oldPos = extinguish.Position
+                    elseif plotBarrier and plotBarrier:IsA("BasePart") and char then
+                        pcall(function() char:PivotTo(plotBarrier.CFrame * CFrame.new(0, 6, 0)) end)
+                    end
+                    local deadline = os.clock() + 2
+                    repeat
+                        if movedPart then movedPart.Position = root.Position end
+                        local firePart = char and char:FindFirstChild("FirePlayerPart", true)
+                        if firePart then
+                            for _, obj in ipairs(firePart:GetChildren()) do
+                                if obj:IsA("Sound") then obj:Stop() end
+                                if obj:IsA("Light") or obj:IsA("ParticleEmitter") then obj.Enabled = false end
+                            end
+                            local canBurn = firePart:FindFirstChild("CanBurn")
+                            if canBurn then canBurn.Value = false end
+                        end
+                        task.wait()
+                    until not fireDebounce.Value or os.clock() > deadline
+                    if movedPart and oldPos then movedPart.Position = oldPos end
+                    if char and char.Parent then pcall(function() char:PivotTo(old) end) elseif root then root.CFrame = old end
+                end
+            end))
+        end
+    end
+
+    local function setAntiExplosion(enabled)
+        runtime.toggles.antiExplosion = enabled
+        disconnectKey("antiExplosion")
+        if enabled and Remotes.BombExplode then
+            setKeyConnection("antiExplosion", Remotes.BombExplode.OnClientEvent:Connect(function()
+                local char, hum, root = charParts()
+                if root then
+                    root.Anchored = true
+                    safeFire(Remotes.StopAllVelocity)
+                    stopVelocity(root)
+                    task.defer(function()
+                        task.wait()
+                        if root and root.Parent and not runtime.toggles.recoveryLock then root.Anchored = false end
+                    end)
+                end
+                if hum and not hum.SeatPart then hum.Sit = false end
+                if char then
+                    for _, limbName in ipairs({"Left Arm", "Left Leg", "Right Arm", "Right Leg"}) do
+                        local limb = char:FindFirstChild(limbName)
+                        local ragdollPart = limb and limb:FindFirstChild("RagdollLimbPart")
+                        if ragdollPart and ragdollPart:IsA("BasePart") then ragdollPart.CanCollide = false end
                     end
                 end
             end))
@@ -723,7 +769,7 @@ function Core.init()
                     item = spawnToy(runtime.values.antiKickToy, root.CFrame, Vector3.zero, 2)
                     if item then item.Name = "NomNomAntiKickItem" end
                 end
-                local hit = item and (item:FindFirstChild("Hitbox") or item:FindFirstChild("HoldPart") or item.PrimaryPart)
+                local hit = item and (item:FindFirstChild("Hitbox") or item:FindFirstChild("HoldPart") or item:FindFirstChild("StickyPart") or item:FindFirstChild("SoundPart") or item.PrimaryPart)
                 if hit then
                     sno(hit)
                     hit.CFrame = root.CFrame
@@ -733,6 +779,50 @@ function Core.init()
                 end
             end))
         end
+    end
+
+    local function setShurikenAntiKick(enabled)
+        runtime.toggles.shurikenAntiKick = enabled
+        disconnectKey("shurikenAntiKick")
+        if not enabled then
+            local inv = runtime.inventory
+            if inv then
+                for _, toy in ipairs(inv:GetChildren()) do
+                    if toy.Name == "NomNomShurikenAntiKick" or toy.Name == "AntiKick" then destroyToy(toy) end
+                end
+            end
+            return
+        end
+        setKeyConnection("shurikenAntiKick", RunService.Heartbeat:Connect(function()
+            local char, hum, root = charParts()
+            if not (char and hum and root) or hum.Health <= 0 then return end
+            local inv = runtime.inventory
+            if not inv then return end
+            local kunai = inv:FindFirstChild("NomNomShurikenAntiKick") or inv:FindFirstChild("AntiKick")
+            if not kunai then
+                kunai = spawnToy("NinjaShuriken", root.CFrame * CFrame.new(0, 12, 20), Vector3.zero, 2)
+                if kunai then kunai.Name = "NomNomShurikenAntiKick" end
+            end
+            if not kunai then return end
+            local sticky = kunai:FindFirstChild("StickyPart")
+            local sound = kunai:FindFirstChild("SoundPart")
+            local firePart = root:FindFirstChild("FirePlayerPart") or char:FindFirstChild("FirePlayerPart", true)
+            if sound then sno(sound) end
+            if sticky and firePart then
+                safeFire(Remotes.Sticky, sticky, firePart, CFrame.new(0, 0, 0) * CFrame.Angles(0, math.rad(90), math.rad(90)))
+            end
+            for _, part in ipairs(kunai:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanTouch = false
+                    part.CanCollide = false
+                    part.CanQuery = false
+                    if part.Name ~= "Pyramid" and part.Name ~= "Main" then part.Transparency = 1 end
+                end
+            end
+            if sticky and (sticky.Position - root.Position).Magnitude > runtime.values.shurikenAntiKickDistance then
+                destroyToy(kunai)
+            end
+        end))
     end
 
     local function setInputLagGuard(enabled)
@@ -839,6 +929,7 @@ function Core.init()
         setHighPatrol = setHighPatrol,
         setAntiPaint = setAntiPaint,
         setAntiBurn = setAntiBurn,
+        setAntiExplosion = setAntiExplosion,
         setAntiBlob = setAntiBlob,
         setWalkSpeed = setWalkSpeed,
         setInfinityJump = setInfinityJump,
@@ -849,6 +940,7 @@ function Core.init()
         setPlayerESP = setPlayerESP,
         setPCLDESP = setPCLDESP,
         setAntiKickItem = setAntiKickItem,
+        setShurikenAntiKick = setShurikenAntiKick,
         setInputLagGuard = setInputLagGuard,
         teleportMap = teleportMap,
         deleteLegs = deleteLegs,

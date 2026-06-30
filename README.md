@@ -1,6 +1,6 @@
 # NomNomFTAP-alt
 
-Unified Wourld-style Obsidian build for private Roblox/FTAP development.
+Canonical The Wourld-style Obsidian build for private Roblox/FTAP development. The Wourld is the base script and UI style; NoName, XOCO, and NoName-Apple are comparison sources whose stronger/missing features are integrated directly into Wourld-style sections.
 
 ## Usage
 
@@ -14,10 +14,10 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/NomNomNemNie/NomNomFT
 
 ## Module layout
 
-- `Loader.lua` is the only real entrypoint. It initializes Core, builds UI, and registers each feature section.
+- `Loader.lua` is the only real entrypoint. It initializes Core, builds the canonical Wourld-style UI, and registers each direct feature section.
 - `modules/Core.lua` owns rerun cleanup, shared services, remotes, character refresh, helper functions, tracked connections, tracked instances, task cleanup, and feature primitives.
 - `modules/UI.lua` creates the Obsidian window/tabs and exposes the shared group helper.
-- `modules/Gucci.lua` registers Home, Protection, Gucci, anti-kick, and delete-legs controls.
+- `modules/Gucci.lua` registers Home, Protection, Gucci, anti-explosion, anti-kick, shuriken anti-kick, and delete-legs controls.
 - `modules/Combat.lua` registers grab, line, aura, and combat controls.
 - `modules/Movement.lua` registers movement and world/player controls.
 - `modules/Visuals.lua` registers camera, ESP, and lighting controls.
@@ -55,11 +55,11 @@ That wrapper then loads `Loader.lua`.
 
 ## Source summary
 
-See `STRONG_COMPARISON.md` for the full source comparison and integration notes.
+`Source/Strong/The Wourld` is canonical. `Source/Strong/NoName`, `Source/Strong/XOCO`, and `Source/Strong/NoName-Apple` were compared against it and only selected stronger/missing features were integrated. See `STRONG_COMPARISON.md` for the full source comparison and integration notes.
 
 ## Safety notes
 
-- No lazy source-pack buttons.
+- No lazy source-pack buttons or equal-source pack switching.
 - No encoded payload pack loader or encoded chunk table structure.
 - No automatic public-chat send, startup room spam, or public-chat advertisement logic.
 - No absolute local workstation paths are required by repo files.

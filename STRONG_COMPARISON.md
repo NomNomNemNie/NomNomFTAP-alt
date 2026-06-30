@@ -1,29 +1,31 @@
 # Strong source comparison
 
-This document records the full rebuild comparison used for `NomNom.lua`. The final script is a direct Wourld-style Obsidian synthesis, not a pack loader.
+This document records the comparison used for the modular `NomNom.lua`/`Loader.lua` build. `Source/Strong/The Wourld` is the canonical base script, UI standard, and naming model. `Source/Strong/NoName`, `Source/Strong/XOCO`, and `Source/Strong/NoName-Apple` are comparison sources only; stronger or missing ideas are integrated directly into Wourld-style NomNom sections, not treated as equal packs and not exposed as source-pack loader buttons.
 
 ## Source roles
 
-| Source | UI style | Primary strengths | Integrated outcome |
-| --- | --- | --- | --- |
-| `Source/Strong/The Wourld` | Obsidian-style UI and Wourld UX conventions | Defense/protection, Gucci flow, target/server sections, keybind/settings structure, rerun cleanup marker | Used as the final UX standard and naming model. |
-| `Source/Strong/NoName` | Orion tabs: Defense, Grabs, Player, Target, Keybinds, Visual, Misc, Owner, Settings | Anti-grab, AntiKick shuriken/item, AntiBlob, AntiPaint, AntiBurn, AntiVoid, super strength, infinity line extend, grab modifiers, auras, player movement, ESP/PCLD ESP, map points | Feature concepts reimplemented inside matching Wourld/Obsidian tabs with shared helpers and tracked connections. |
-| `Source/Strong/XOCO` | Solaris tabs: defense, target, grab, player, misc, keybinds, visuals | Multiple AntiGrab versions, AntiBlob aura/drop logic, Gucci/invisible Gucci/watchdogs, platform TP, input-lag item loops, auto reset/leave correction handlers, paint cleanup, delete legs, anti-burn | Stronger Gucci/protection and utility ideas integrated cleanly without copying giant top-level generated blocks. |
+| Source | Role | UI style | Stronger or missing features found | Integrated outcome |
+| --- | --- | --- | --- | --- |
+| `Source/Strong/The Wourld` | Canonical base | Obsidian-style UI and Wourld UX conventions | Defense/protection, Gucci flow, target/server sections, keybind/settings structure, rerun cleanup marker | Kept as the final UX standard, tab model, and naming model. Loader/modules are Wourld-style. |
+| `Source/Strong/NoName` | Comparison source | Orion tabs: Defense, Grabs, Player, Target, Keybinds, Visual, Misc, Owner, Settings | Anti-grab, AntiKick shuriken/item, AntiBlob, AntiPaint, AntiBurn, AntiVoid, super strength, infinity line extend, grab modifiers, auras, player movement, ESP/PCLD ESP, map points, anti-explosion pattern | Feature concepts reimplemented inside matching Wourld/Obsidian tabs with shared helpers and tracked connections. |
+| `Source/Strong/XOCO` | Comparison source | Solaris tabs: defense, target, grab, player, misc, keybinds, visuals | Multiple AntiGrab versions, AntiBlob aura/drop logic, Gucci/invisible Gucci/watchdogs, platform TP, input-lag item loops, auto reset/correction handlers, paint cleanup, delete legs, stronger anti-burn, anti-explosion, shuriken anti-kick | Stronger Gucci/protection and utility ideas integrated cleanly without copying generated top-level blocks. |
+| `Source/Strong/NoName-Apple` | Comparison source | Obsidian Apple/Russian localization layout | Obsidian-compatible grouping, AntiExplosion, stronger anti-burn fire-part cleanup, shuriken anti-kick anchor loop, KillGrab concept, Russian labels | Only safe/maintainable features were integrated: AntiExplosion, improved AntiBurn cleanup, and shuriken anti-kick anchor. Apple/Russian UI and KillGrab were not adopted because Wourld remains canonical and the build avoids destructive target-health controls. |
 
 ## Feature comparison
 
 ### UI structure
 
-- Wourld is the standard for the final UX because it already follows an Obsidian-style window/tab/groupbox model.
-- NoName and XOCO feature families were mapped into: Home, Protection / Gucci, Combat / Grab, Player, Visuals, Toys / Utility, Teleports / Map, and Settings.
-- The final build has no lazy source-pack buttons, encoded chunk table, base64 source payloads, or lazy pack execution buttons.
+- Wourld is the canonical standard for the final UX because it already follows an Obsidian-style window/tab/groupbox model and matches the intended Wourld flow.
+- NoName, XOCO, and NoName-Apple feature families were mapped into: Home, Protection / Gucci, Combat / Grab, Player, Visuals, Toys / Utility, Teleports / Map, and Settings.
+- The final build has no lazy source-pack buttons, encoded chunk table, base64 source payloads, lazy pack execution buttons, or equal-source pack selection.
 
 ### Protection / Gucci
 
 - Wourld contributes the base protection/Gucci concept and Obsidian interaction style.
-- NoName contributes AntiGrab, AntiKick item/shuriken concepts, AntiBlob, AntiPaint, AntiBurn, AntiVoid, AntiBarrier, anti-loop-kill map recovery, and delete-legs recovery.
-- XOCO contributes verified-style anti-grab loops, anti-blob aura/drop, platform/high safety concepts, invisible/auto Gucci watchdog ideas, correction reset, and stronger cleanup around Gucci toys.
-- Final synthesis includes verified protection, anti steal-seat, anti massless/blob physics, recovery lock, anti blob/drop aura, anti paint, anti burn, no void despawn, bind Gucci, auto Gucci watchdog, anti-destroy stabilizer, high/safe patrol, anti-kick item attach, and delete legs.
+- NoName contributes AntiGrab, AntiKick item/shuriken concepts, AntiBlob, AntiPaint, AntiBurn, AntiVoid, AntiBarrier, anti-explosion, anti-loop-kill map recovery, and delete-legs recovery.
+- XOCO contributes verified-style anti-grab loops, anti-blob aura/drop, platform/high safety concepts, invisible/auto Gucci watchdog ideas, correction reset, anti-explosion, and stronger cleanup around Gucci toys.
+- NoName-Apple confirms the Obsidian-compatible shuriken anti-kick and anti-explosion approaches and adds stronger fire-part cleanup for AntiBurn.
+- Final synthesis includes verified protection, anti steal-seat, anti massless/blob physics, recovery lock, anti blob/drop aura, anti paint, anti burn/extinguish cleanup, anti explosion, no void despawn, bind Gucci, auto Gucci watchdog, anti-destroy stabilizer, high/safe patrol, anti-kick item attach, shuriken anti-kick anchor, and delete legs.
 
 ### Combat / grab / target
 
@@ -56,16 +58,17 @@ This document records the full rebuild comparison used for `NomNom.lua`. The fin
 
 ### Settings / cleanup / recovery
 
-- All three scripts had previous rerun/public-chat fixes carried forward.
+- Wourld canonical loader/runtime markers are preserved while the implementation remains modular.
 - Final runtime tracks connections, tasks, and instances, cleans a previous run before mounting, refreshes character state on respawn, and uses low-noise notification cooldowns.
 - No automatic public-chat APIs or startup public chat sends are used.
 
 ## Source fixes applied
 
-- Wourld: retained rerun/register scope markers; public chat announcement remains disabled.
-- NoName: retained rerun cleanup; fixed public chat service removal, `character` raycast typo, `shi`/`HRP` typo, shuriken name typo, and untracked PCLD ESP connection.
-- XOCO: retained rerun cleanup and added register-scope wrapper if missing; fixed startup loaded-message auto call removal, `MouseMouseBehavior` typo, several callback `Value` vs `v` mistakes, and a malformed notification call.
+- Wourld: retained as canonical UI/base; public chat announcement remains disabled.
+- NoName: retained stronger feature concepts; public chat service removal, `character` raycast typo, `shi`/`HRP` typo, shuriken name typo, and untracked PCLD ESP connection are not carried into the modular implementation.
+- XOCO: retained stronger Gucci/protection concepts; startup loaded-message auto call, `MouseMouseBehavior` typo, callback `Value` vs `v` mistakes, and malformed notification call are not carried into the modular implementation.
+- NoName-Apple: retained AntiExplosion, enhanced AntiBurn cleanup, and shuriken anti-kick anchor; Apple/Russian UI, global reset sweep, and destructive KillGrab target-health logic are not carried into the Wourld canonical build.
 
 ## Final integration strategy
 
-The final `NomNom.lua` is not a concatenation. It extracts feature concepts and reimplements them through shared helpers for remotes, character refresh, toy spawn, notifications, cleanup, loops, and Obsidian controls. This keeps top-level local/register pressure low and makes the script paste-run compatible.
+The final `NomNom.lua` is not a concatenation and not a pack switcher. It loads the Wourld-style modular runtime through `Loader.lua`, extracts comparison-source feature concepts, and reimplements them through shared helpers for remotes, character refresh, toy spawn, notifications, cleanup, loops, and Obsidian controls. This keeps top-level local/register pressure low and makes the script paste-run compatible without losing the Wourld base.

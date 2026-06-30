@@ -41,6 +41,7 @@ function Gucci.register(ctx)
     local setHighPatrol = ctx.setHighPatrol
     local setAntiPaint = ctx.setAntiPaint
     local setAntiBurn = ctx.setAntiBurn
+    local setAntiExplosion = ctx.setAntiExplosion
     local setAntiBlob = ctx.setAntiBlob
     local setWalkSpeed = ctx.setWalkSpeed
     local setInfinityJump = ctx.setInfinityJump
@@ -51,12 +52,13 @@ function Gucci.register(ctx)
     local setPlayerESP = ctx.setPlayerESP
     local setPCLDESP = ctx.setPCLDESP
     local setAntiKickItem = ctx.setAntiKickItem
+    local setShurikenAntiKick = ctx.setShurikenAntiKick
     local setInputLagGuard = ctx.setInputLagGuard
     local teleportMap = ctx.teleportMap
     local deleteLegs = ctx.deleteLegs
     local HomeLeft = group(Tabs.Home, "Unified Build", "left")
-    HomeLeft:AddLabel("Standalone synthesized script; no lazy source-pack buttons, no encoded chunk table, and no payload loader.")
-    HomeLeft:AddLabel("Base UX: The Wourld Obsidian style. Integrated features: Wourld protection + NoName grab/player/visuals + XOCO Gucci/defense/toys.")
+    HomeLeft:AddLabel("The Wourld is the canonical base: Obsidian window, Wourld tab flow, direct feature sections.")
+    HomeLeft:AddLabel("NoName, XOCO, and NoName-Apple only contribute stronger/missing features; no source-pack buttons or payload loader.")
     HomeLeft:AddButton("Local test notification", function() notify("NomNom", "Unified script is active", 1) end)
 
     local HomeRight = group(Tabs.Home, "Runtime", "right")
@@ -70,7 +72,8 @@ function Gucci.register(ctx)
     ProtectMain:AddToggle("RecoveryLock", { Text = "Recovery lock", Default = false, Callback = function(v) runtime.toggles.recoveryLock = v; local _,_,root=charParts(); if root then root.Anchored = v end end })
     ProtectMain:AddToggle("AntiBlob", { Text = "Anti Blob / Drop Aura", Default = false, Callback = setAntiBlob })
     ProtectMain:AddToggle("AntiPaint", { Text = "Anti Paint", Default = false, Callback = setAntiPaint })
-    ProtectMain:AddToggle("AntiBurn", { Text = "Anti Burn", Default = false, Callback = setAntiBurn })
+    ProtectMain:AddToggle("AntiBurn", { Text = "Anti Burn / extinguish", Default = false, Callback = setAntiBurn })
+    ProtectMain:AddToggle("AntiExplosion", { Text = "Anti Explosion", Default = false, Callback = setAntiExplosion })
     ProtectMain:AddToggle("NoVoidDespawn", { Text = "No void despawn", Default = true, Callback = function(v) runtime.toggles.noVoidDespawn = v; Workspace.FallenPartsDestroyHeight = v and -1000000000 or -100 end })
 
     local GucciGroup = group(Tabs.Protection, "Gucci / Anti-Kick", "right")
@@ -81,6 +84,7 @@ function Gucci.register(ctx)
     GucciGroup:AddToggle("HighPatrol", { Text = "High/safe patrol", Default = false, Callback = setHighPatrol })
     GucciGroup:AddDropdown("AntiKickToy", { Text = "Anti-kick item", Values = {"SpookyCandle1", "JapaneseLantern", "SprayCanWD"}, Default = "SpookyCandle1", Callback = function(v) runtime.values.antiKickToy = v end })
     GucciGroup:AddToggle("AntiKickItem", { Text = "Anti-kick item attach", Default = false, Callback = setAntiKickItem })
+    GucciGroup:AddToggle("ShurikenAntiKick", { Text = "Shuriken anti-kick anchor", Default = false, Callback = setShurikenAntiKick })
     GucciGroup:AddButton("Delete Legs", deleteLegs)
 end
 

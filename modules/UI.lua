@@ -26,7 +26,13 @@ function UI.init(ctx)
     }
 
     local function group(tab, name, side)
-        return tab:AddLeftGroupbox and (side == "left" and tab:AddLeftGroupbox(name) or tab:AddRightGroupbox(name)) or tab:AddGroupbox(name)
+        if side == "left" and type(tab.AddLeftGroupbox) == "function" then
+            return tab:AddLeftGroupbox(name)
+        end
+        if side ~= "left" and type(tab.AddRightGroupbox) == "function" then
+            return tab:AddRightGroupbox(name)
+        end
+        return tab:AddGroupbox(name)
     end
     ctx.Window = Window
     ctx.Tabs = Tabs
