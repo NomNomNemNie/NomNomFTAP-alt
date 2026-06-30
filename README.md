@@ -4,16 +4,43 @@ Unified Wourld-style Obsidian build for private Roblox/FTAP development.
 
 ## Usage
 
-Paste-run `NomNom.lua`. The script loads the Obsidian UI, opens `NomNom FTAP Alt • Wourld Unified`, and exposes the integrated controls directly. Right Control toggles the Obsidian window when supported by the UI library.
+Use `Loader.lua` as the single runtime entrypoint:
 
-## Architecture
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/NomNomNemNie/NomNomFTAP-alt/main/Loader.lua", true))()
+```
 
-`NomNom.lua` is a standalone synthesized script, not a pack loader.
+`NomNom.lua` remains as a compatibility wrapper for older paste-run links. It simply loads `Loader.lua` from the same GitHub raw branch.
 
-- Wourld UI/UX is used as the base style.
-- NoName and XOCO feature concepts are integrated directly into Wourld-style tabs and groupboxes.
-- Shared helpers manage remotes, character refresh, toy spawning, network ownership, notifications, tracked connections, tracked instances, task loops, respawn handling, and rerun cleanup.
-- The previous runtime is cleaned before a new paste-run session starts.
+## Module layout
+
+- `Loader.lua` is the only real entrypoint. It initializes Core, builds UI, and registers each feature section.
+- `modules/Core.lua` owns rerun cleanup, shared services, remotes, character refresh, helper functions, tracked connections, tracked instances, task cleanup, and feature primitives.
+- `modules/UI.lua` creates the Obsidian window/tabs and exposes the shared group helper.
+- `modules/Gucci.lua` registers Home, Protection, Gucci, anti-kick, and delete-legs controls.
+- `modules/Combat.lua` registers grab, line, aura, and combat controls.
+- `modules/Movement.lua` registers movement and world/player controls.
+- `modules/Visuals.lua` registers camera, ESP, and lighting controls.
+- `modules/Toys.lua` registers toy utilities and line color controls.
+- `modules/Teleports.lua` registers map and player teleport controls.
+- `modules/Settings.lua` registers cleanup, safety, and keybind controls.
+- `modules/Protection.lua` is a compatibility module name; protection controls are currently registered by `modules/Gucci.lua` so Gucci/protection state stays together.
+
+## Loader strategy
+
+Roblox executors usually cannot `require` local files from a checked-out repository. For practical executor compatibility, `Loader.lua` fetches each module through `game:HttpGet` from GitHub raw URLs, compiles it with `loadstring`, and then calls module `init`/`register` functions.
+
+The module files are still source-of-truth references in this repo. Keeping them separate makes review and maintenance easier while the loader remains paste-run compatible in executor environments.
+
+## Standalone compatibility
+
+`NomNom.lua` is intentionally small and not a second implementation. It exists only as a convenience wrapper:
+
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/NomNomNemNie/NomNomFTAP-alt/main/NomNom.lua", true))()
+```
+
+That wrapper then loads `Loader.lua`.
 
 ## Integrated tabs
 
