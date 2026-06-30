@@ -4,7 +4,7 @@ This alt repository contains the standalone merged `NomNom.lua` launcher for the
 
 ## What is merged
 
-`NomNom.lua` embeds all three `Source/Strong` packs as lazy payloads:
+`NomNom.lua` embeds all three `Source/Strong` packs as lazy base64 chunk arrays:
 
 - `The Wourld Base` - base pack with Defense, Target, Visuals, Server, Misc, Keybinds, Owner, Credits, and UI settings.
 - `NoName Pack` - defense, grab tools, player controls, target tools, keybinds, visuals, misc, owner/config, and lag-related sections.
